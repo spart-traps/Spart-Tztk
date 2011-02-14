@@ -525,16 +525,16 @@ sub player_create {
   }
 
   syswrite($player, $packet{cs_login}($username, ""));
-  select undef, undef, undef, .2;
+  select undef, undef, undef, .5;
   syswrite($player, $packet{cs_keepalive}());
   return $player;
 }
 
 sub player_destroy {
   syswrite($_[0], $packet{cs_keepalive}());
-  select undef, undef, undef, .8;
+  select undef, undef, undef, 1;
   syswrite($_[0], $packet{cs_disconnect}($_[0]||""));
-  select undef, undef, undef, .8;
+  select undef, undef, undef, 1;
   close $_[0];
 }
 
@@ -857,10 +857,12 @@ sub take_items {
     return 0 unless $inv_count{$id} >= $cost{$id};
   }
 
-  foreach my $inv (@{$nbt->{payload}{Inventory}{payload}{listdata}}) {
-    next unless $cost{$inv->{id}{payload}};
-    $inv->{Count}{payload} -= $cost{$inv->{id}{payload}};
-    $cost{$inv->{id}{payload}} = $inv->{Count}{payload} < 0 ? -$inv->{Count}{payload} : 0;
+  my $listdata = $nbt->{payload}{Inventory}{payload}{listdata};
+  for (my $i=$#$listdata; $i>=0; $i--) {
+    next unless $cost{$listdata->[$i]{id}{payload}};
+    $listdata->[$i]{Count}{payload} -= $cost{$listdata->[$i]{id}{payload}};
+    $cost{$listdata->[$i]{id}{payload}} = $listdata->[$i]{Count}{payload} < 0 ? -$listdata->[$i]{Count}{payload} : 0;
+    delete $listdata->[$i] if $listdata->[$i]{Count}{payload} < 1;
   }
 
   return 1;
