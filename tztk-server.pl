@@ -12,6 +12,7 @@ use File::Copy;
 use POSIX qw(strftime);
 use IO::Uncompress::Gunzip qw(gunzip);
 use IO::Compress::Gzip qw(gzip);
+use LWP::UserAgent;
 
 my $protocol_version = 8;
 my $client_version = 99;
@@ -62,7 +63,9 @@ my $tztk_dir = cat("tztk-dir") || "tztk";
 my $cmddir = "$tztk_dir/allowed-commands";
 my $snapshotdir = "$tztk_dir/snapshots";
 my %msgcolor = (info => 36, warning => 33, error => 31, tztk => 32, chat => 35);
+
 $|=1;
+my $ua = new LWP::UserAgent; $ua->agent("tztk");
 
 # load server properties
 my %server_properties;
@@ -677,21 +680,18 @@ sub urlenc {
 sub http {
   my ($host, $path, $post) = @_;
 
-  my $http = IO::Socket::INET->new(
-    Proto     => "tcp",
-    PeerAddr  => $host,
-    PeerPort  => 80,
-  ) or die "can't connect to $host for http: $!";
+  my $req;
 
-  print $http +(defined $post ? "POST" : "GET")." $path HTTP/1.0\r\nHost: $host\r\n";
   if (defined $post) {
-    print $http "Content-Length: ".length($post)."\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\n$post";
+    $req = HTTP::Request->new(POST => "http://$host$path");
+    $req->content_type('application/x-www-form-urlencoded');
+    $req->content($post);
   } else {
-    print $http "\r\n";
+    $req = HTTP::Request->new(GET => "http://$host$path");
   }
 
-  while (<$http> =~ /\S/) {}
-  return join("\n", <$http>);
+  my $res = $ua->request($req);
+  return $res->is_success ? $res->decoded_content : "";
 }
 
 sub read_player {
@@ -720,7 +720,7 @@ sub read_nbt {
   my ($filename) = @_;
 
   my $input;
-  gunzip $filename => \$input;
+  gunzip($filename => \$input);
   my ($name, $nbt) = read_named_tag({d=>$input,c=>0});
   return ref $nbt ? $nbt : undef;
 }
@@ -730,7 +730,7 @@ sub write_nbt {
 
   my $output;
   write_named_tag(\$output, "", $nbt);
-  gzip \$output => $filename;
+  gzip(\$output => $filename);
 }
 
 sub read_named_tag {
