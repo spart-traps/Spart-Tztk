@@ -154,7 +154,7 @@ while (kill 0 => $server_pid) {
 
       # init messages
       # Done! For help, type "help" or "?"
-      if ($mc =~ /^Done\!\s*For\s+help\,\s*type\b/) {
+      if ($mc =~ /^Done(?:\s*\(\w+\))?\!\s*For\s+help\,\s*type\b/) {
         $server_ready = 1;
         console_exec('list');
       # chat messages
