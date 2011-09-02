@@ -14,7 +14,7 @@ use IO::Uncompress::Gunzip qw(gunzip);
 use IO::Compress::Gzip qw(gzip);
 use LWP::UserAgent;
 
-my $protocol_version = 10;
+my $protocol_version = 11;
 my $client_version = 99;
 my $server_memory = "1024M";
 
@@ -113,6 +113,7 @@ if (-d "$tztk_dir/irc") {
 my $server_pid = 0;
 $SIG{PIPE} = sub { print color(error => "SIGPIPE (\$?=$?, k0=".(kill 0 => $server_pid).", \$!=$!)\n"); };
 $server_pid = open2(\*MCOUT, \*MCIN, "java -Xmx$server_memory -Xms$server_memory -jar minecraft_server.jar nogui 2>&1");
+MCOUT->blocking(0);
 print "Minecraft SMP Server launched with pid $server_pid\n";
 
 my (@players, %payments_pending, $want_list);
@@ -123,7 +124,7 @@ my $sel = new IO::Select(\*MCOUT, \*STDIN);
 $sel->add($irc->{socket}) if $irc;
 
 while (kill 0 => $server_pid) {
-  foreach my $fh ($sel->can_read(60)) {
+  foreach my $fh ($sel->can_read(1)) {
     if ($fh == \*STDIN) {
       my $stdin = <STDIN>;
       if (!defined $stdin) {
@@ -141,296 +142,300 @@ while (kill 0 => $server_pid) {
         print "Minecraft server seems to have shut down.  Exiting...\n";
         exit;
       }
-      my $mc = <MCOUT>;
-      my ($msgprefix, $msgtype) = ("", "");
-      # 2010-09-23 18:36:53 [INFO]
-      ($msgprefix, $msgtype) = ($1, lc $2) if $mc =~ s/^([\d\-\s\:]*\[(\w+)\]\s*)//;
-      $msgprefix = strftime('%F %T [MISC] ', localtime) unless length $msgprefix;
-      $mc =~ s/\xc2\xa7[0-9a-f]//g; #remove color codes
-      $msgtype = 'chat' if $msgtype eq 'info' && $mc =~ /^\<[\w\-]+\>\s+[^\-]/;
-      print color($msgtype => $msgprefix.$mc);
+      while (my $mc = <MCOUT>) {
+        my ($msgprefix, $msgtype) = ("", "");
+        # 2010-09-23 18:36:53 [INFO]
+        ($msgprefix, $msgtype) = ($1, lc $2) if $mc =~ s/^([\d\-\s\:]*\[(\w+)\]\s*)//;
+        $msgprefix = strftime('%F %T [MISC] ', localtime) unless length $msgprefix;
+        $mc =~ s/\xc2\xa7[0-9a-f]//g; #remove color codes
+        $msgtype = 'chat' if $msgtype eq 'info' && $mc =~ /^\<[\w\-]+\>\s+[^\-]/;
+        print color($msgtype => $msgprefix.$mc);
 
-      my ($cmd_user, $cmd_name, $cmd_args);
+        my ($cmd_user, $cmd_name, $cmd_args);
 
-      # init messages
-      # Done! For help, type "help" or "?"
-      if ($mc =~ /^Done(?:\s*\(\w+\))?\!\s*For\s+help\,\s*type\b/) {
-        $server_ready = 1;
-        console_exec('list');
-      # chat messages
-      # <Username> Message text here
-      } elsif ($mc =~ /^\<([\w\-]+)\>\s*(.+?)\s*$/) {
-        my ($username, $msg) = ($1, $2);
+        # init messages
+        # Done! For help, type "help" or "?"
+        if ($mc =~ /^Done(?:\s*\(\w+\))?\!\s*For\s+help\,\s*type\b/) {
+          $server_ready = 1;
+          console_exec('list');
+        # chat messages
+        # <Username> Message text here
+        } elsif ($mc =~ /^\<([\w\-]+)\>\s*(.+?)\s*$/) {
+          my ($username, $msg) = ($1, $2);
 
-        if ($msg =~ /^\-([\w\-]+)(?:\s+(.+?))?\s*$/) {
-          ($cmd_user, $cmd_name, $cmd_args) = ($username, $1, $2);
-        } else {
-          irc_send($irc, "<$username> $msg") if $irc;
-        }
-      # whispers
-      # 2011-01-08 21:24:10 [INFO] Topaz2078 whispers asdfasdf to nobody
-      } elsif ($mc =~ /^([\w\-]+)\s+whispers\s+(.+?)\s+to\s+\-([\w\-]+)\s$/) {
-        ($cmd_user, $cmd_name, $cmd_args) = ($1, $3, $2);
-      # connection notices
-      # Username [/1.2.3.4:5679] logged in with entity id 25
-      } elsif ($mc =~ /^([\w\-]+)\s*\[\/([\d\.]+)\:\d+\]\s*logged\s+in\b/) {
-        my ($username, $ip) = ($1, $2);
-
-        if ($ip ne '127.0.0.1') {
-          my ($whitelist_active, $whitelist_passed) = (0,0);
-          if (-d "$tztk_dir/whitelisted-ips") {
-            $whitelist_active = 1;
-            $whitelist_passed = 1 if -e "$tztk_dir/whitelisted-ips/$ip";
+          if ($msg =~ /^\-([\w\-]+)(?:\s+(.+?))?\s*$/) {
+            ($cmd_user, $cmd_name, $cmd_args) = ($username, $1, $2);
+          } else {
+            irc_send($irc, "<$username> $msg") if $irc;
           }
-          if (-d "$tztk_dir/whitelisted-players") {
-            $whitelist_active = 1;
-            $whitelist_passed = 1 if -e "$tztk_dir/whitelisted-players/$username";
-          }
-          if ($whitelist_active && !$whitelist_passed) {
-            console_exec(kick => $username);
-            console_exec(say => "$username tried to join, but was not on any active whitelist");
-            next;
-          }
-        }
+        # whispers
+        # 2011-01-08 21:24:10 [INFO] Topaz2078 whispers asdfasdf to nobody
+        } elsif ($mc =~ /^([\w\-]+)\s+whispers\s+(.+?)\s+to\s+\-([\w\-]+)\s$/) {
+          ($cmd_user, $cmd_name, $cmd_args) = ($1, $3, $2);
+        # connection notices
+        # Username [/1.2.3.4:5679] logged in with entity id 25
+        } elsif ($mc =~ /^([\w\-]+)\s*\[\/([\d\.]+)\:\d+\]\s*logged\s+in\b/) {
+          my ($username, $ip) = ($1, $2);
 
-        irc_send($irc, "$username has connected") if $irc && player_is_human($username);
-
-        if (player_is_human($username) && -e "$tztk_dir/motd" && open(MOTD, "$tztk_dir/motd")) {
-          console_exec(tell => $username => "Message of the day:");
-          while (<MOTD>) {
-            chomp;
-            next unless /\S/;
-            console_exec(tell => $username => $_);
-          }
-          close MOTD;
-        }
-      # connection lost notices
-      # Username lost connection: Quitting
-      } elsif ($mc =~ /^([\w\-]+)\s+lost\s+connection\:\s*(.+?)\s*$/) {
-        my ($username, $reason) = ($1, $2);
-        irc_send($irc, "$username has disconnected: $reason") if $irc && player_is_human($username);
-        if (exists $payments_pending{$username}) {
-          my $bank_dir = "$server_properties{level_name}/players/tztk";
-          mkdir $bank_dir unless -d $bank_dir;
-          $bank_dir .= "/bank";
-          mkdir $bank_dir unless -d $bank_dir;
-          $bank_dir .= "/$username";
-          mkdir $bank_dir unless -d $bank_dir;
-
-          my $mtime = 0;
-          for (1..3) {
-            sleep 1;
-            $mtime = (stat("$server_properties{level_name}/players/$username.dat"))[9];
-            last if time - $mtime < 3;
-          }
-          next unless time - $mtime < 3;
-          my $player_nbt = read_player($username);
-          next unless $player_nbt;
-          my $modified_player = 0;
-          foreach my $payment (@{$payments_pending{$username}}) {
-            my %cost;
-            my $cost_dir = "$tztk_dir/payment/$payment->{item}/cost";
-            opendir(CDIR, $cost_dir);
-            $cost{$_} = $payment->{amount} * cat("$cost_dir/$_") foreach grep {!/^\./} readdir CDIR;
-            closedir CDIR;
-
-            if (take_items($player_nbt, \%cost)) {
-              my $payment_file = "$bank_dir/$payment->{item}";
-              my $balance = cat($payment_file) || 0;
-              $balance += $payment->{amount};
-              open(BANKFILE, ">$payment_file");
-              print BANKFILE $balance;
-              close BANKFILE;
-              $modified_player = 1;
+          if ($ip ne '127.0.0.1') {
+            my ($whitelist_active, $whitelist_passed) = (0,0);
+            if (-d "$tztk_dir/whitelisted-ips") {
+              $whitelist_active = 1;
+              $whitelist_passed = 1 if -e "$tztk_dir/whitelisted-ips/$ip";
             }
-          }
-
-          write_player($player_nbt, $username) if $modified_player;
-          delete $payments_pending{$username};
-        }
-        console_exec('list');
-      # player counts
-      # Player count: 0
-      } elsif ($mc =~ /^Player\s+count\:\s*(\d+)\s*$/) {
-        # players.txt upkeep
-        console_exec('list');
-      # userlist players.txt update
-      # Connected players: Topaz2078
-      } elsif ($mc =~ /^Connected\s+players\:\s*(.*?)\s*$/) {
-        @players = grep {/^[\w\-]+$/ && player_is_human($_)} split(/[^\w\-]+/, $1);
-        if (defined $want_list) {
-          console_exec(tell => $want_list => "Connected players: " . join(', ', @players));
-          $want_list = undef;
-        }
-        open(PLAYERS, ">$tztk_dir/players.txt");
-        print PLAYERS map{"$_\n"} @players;
-        close PLAYERS;
-      # snapshot save-complete trigger
-      # CONSOLE: Save complete.
-      } elsif ($mc =~ /^CONSOLE\:\s*Save\s+complete\.\s*$/) {
-        if ($want_snapshot) {
-          $want_snapshot = 0;
-          snapshot_finish();
-        }
-      }
-
-      if (defined $cmd_name && command_allowed($cmd_name)) {
-        if (-e "$tztk_dir/payment/$cmd_name/cost") {
-          my $bank_file = "$server_properties{level_name}/players/tztk/bank/$cmd_user/$cmd_name";
-          my $paid = cat($bank_file);
-          if (!$paid) {
-            console_exec(tell => $cmd_user => "You must pay to use -$cmd_name!  (Try -buy-list to see what.)");
-            next;
-          }
-
-          $paid--;
-          open(BANKFILE, ">$bank_file");
-          print BANKFILE $paid;
-          close BANKFILE;
-
-          console_exec(tell => $cmd_user => "You have $paid more use".($paid==1 ? "" : "s")." of -$cmd_name remaining.");
-        }
-
-        if ($cmd_name eq 'create' && $cmd_args =~ /^(\d+)(?:\s*\D+?\s*(\d+))?|([a-z][\w\-]*)$/) {
-          my ($id, $count, $kit) = ($1, $2||1, lc $3);
-          my @create;
-          if ($kit) {
-            if (!-e "$cmddir/create/kits/$kit") {
-              console_exec(tell => $cmd_user => "That is not a known kit.");
+            if (-d "$tztk_dir/whitelisted-players") {
+              $whitelist_active = 1;
+              $whitelist_passed = 1 if -e "$tztk_dir/whitelisted-players/$username";
+            }
+            if ($whitelist_active && !$whitelist_passed) {
+              console_exec(kick => $username);
+              console_exec(say => "$username tried to join, but was not on any active whitelist");
               next;
             }
-            open(KIT, "$cmddir/create/kits/$kit");
-            while (<KIT>) {
-              next unless /^\s*(\d+)(?:\s*\D+?\s*(\d+))?\s*$/;
-              push @create, [$1, $2||1];
-            }
-
-            if (!@create) {
-              console_exec(tell => $cmd_user => "Nothing to create!  Is the kit defined correctly?");
-              next
-            }
-          } else {
-            @create = ([$id, $count]);
           }
 
-          foreach my $create (@create) {
-            my ($id, $count) = @$create;
-            if (-d "$cmddir/create") {
-              if (-d "$cmddir/create/whitelist" && !-e "$cmddir/create/whitelist/$id") {
-                console_exec(tell => $cmd_user => "Material $id is not in the active creation whitelist.");
+          irc_send($irc, "$username has connected") if $irc && player_is_human($username);
+
+          if (player_is_human($username) && -e "$tztk_dir/motd" && open(MOTD, "$tztk_dir/motd")) {
+            console_exec(tell => $username => "Message of the day:");
+            while (<MOTD>) {
+              chomp;
+              next unless /\S/;
+              console_exec(tell => $username => $_);
+            }
+            close MOTD;
+          }
+
+          console_exec('list');
+        # connection lost notices
+        # Username lost connection: Quitting
+        } elsif ($mc =~ /^([\w\-]+)\s+lost\s+connection\:\s*(.+?)\s*$/) {
+          my ($username, $reason) = ($1, $2);
+          irc_send($irc, "$username has disconnected: $reason") if $irc && player_is_human($username);
+          if (exists $payments_pending{$username}) {
+            my $bank_dir = "$server_properties{level_name}/players/tztk";
+            mkdir $bank_dir unless -d $bank_dir;
+            $bank_dir .= "/bank";
+            mkdir $bank_dir unless -d $bank_dir;
+            $bank_dir .= "/$username";
+            mkdir $bank_dir unless -d $bank_dir;
+
+            my $mtime = 0;
+            for (1..3) {
+              sleep 1;
+              $mtime = (stat("$server_properties{level_name}/players/$username.dat"))[9];
+              last if time - $mtime < 3;
+            }
+            next unless time - $mtime < 3;
+            my $player_nbt = read_player($username);
+            next unless $player_nbt;
+            my $modified_player = 0;
+            foreach my $payment (@{$payments_pending{$username}}) {
+              my %cost;
+              my $cost_dir = "$tztk_dir/payment/$payment->{item}/cost";
+              opendir(CDIR, $cost_dir);
+              $cost{$_} = $payment->{amount} * cat("$cost_dir/$_") foreach grep {!/^\./} readdir CDIR;
+              closedir CDIR;
+
+              if (take_items($player_nbt, \%cost)) {
+                my $payment_file = "$bank_dir/$payment->{item}";
+                my $balance = cat($payment_file) || 0;
+                $balance += $payment->{amount};
+                open(BANKFILE, ">$payment_file");
+                print BANKFILE $balance;
+                close BANKFILE;
+                $modified_player = 1;
+              }
+            }
+
+            write_player($player_nbt, $username) if $modified_player;
+            delete $payments_pending{$username};
+          }
+          console_exec('list');
+        # player counts
+        # Player count: 0
+        } elsif ($mc =~ /^Player\s+count\:\s*(\d+)\s*$/) {
+          # players.txt upkeep
+          console_exec('list');
+        # userlist players.txt update
+        # Connected players: Topaz2078
+        } elsif ($mc =~ /^Connected\s+players\:\s*(.*?)\s*$/) {
+          @players = grep {/^[\w\-]+$/ && player_is_human($_)} split(/[^\w\-]+/, $1);
+          if (defined $want_list) {
+            console_exec(tell => $want_list => "Connected players: " . join(', ', @players));
+            $want_list = undef;
+          }
+          open(PLAYERS, ">$tztk_dir/players.txt");
+          print PLAYERS map{"$_\n"} @players;
+          close PLAYERS;
+        # snapshot save-complete trigger
+        # CONSOLE: Save complete.
+        } elsif ($mc =~ /^CONSOLE\:\s*Save\s+complete\.\s*$/) {
+          if ($want_snapshot) {
+            $want_snapshot = 0;
+            snapshot_finish();
+          }
+        }
+
+        if (defined $cmd_name && command_allowed($cmd_name)) {
+          if (-e "$tztk_dir/payment/$cmd_name/cost") {
+            my $bank_file = "$server_properties{level_name}/players/tztk/bank/$cmd_user/$cmd_name";
+            my $paid = cat($bank_file);
+            if (!$paid) {
+              console_exec(tell => $cmd_user => "You must pay to use -$cmd_name!  (Try -buy-list to see what.)");
+              next;
+            }
+
+            $paid--;
+            open(BANKFILE, ">$bank_file");
+            print BANKFILE $paid;
+            close BANKFILE;
+
+            console_exec(tell => $cmd_user => "You have $paid more use".($paid==1 ? "" : "s")." of -$cmd_name remaining.");
+          }
+
+          if ($cmd_name eq 'create' && $cmd_args =~ /^(\d+)(?:\s*\D+?\s*(\d+))?|([a-z][\w\-]*)$/) {
+            my ($id, $count, $kit) = ($1, $2||1, lc $3);
+            my @create;
+            if ($kit) {
+              if (!-e "$cmddir/create/kits/$kit") {
+                console_exec(tell => $cmd_user => "That is not a known kit.");
                 next;
-              }  elsif (-e "$cmddir/create/blacklist/$id") {
-                console_exec(tell => $cmd_user => "Material $id is in the creation blacklist.");
+              }
+              open(KIT, "$cmddir/create/kits/$kit");
+              while (<KIT>) {
+                next unless /^\s*(\d+)(?:\s*\D+?\s*(\d+))?\s*$/;
+                push @create, [$1, $2||1];
+              }
+
+              if (!@create) {
+                console_exec(tell => $cmd_user => "Nothing to create!  Is the kit defined correctly?");
+                next
+              }
+            } else {
+              @create = ([$id, $count]);
+            }
+
+            foreach my $create (@create) {
+              my ($id, $count) = @$create;
+              $id = $id + 0;
+              if (-d "$cmddir/create") {
+                if (-d "$cmddir/create/whitelist" && !-e "$cmddir/create/whitelist/$id") {
+                  console_exec(tell => $cmd_user => "Material $id is not in the active creation whitelist.");
+                  next;
+                }  elsif (-e "$cmddir/create/blacklist/$id") {
+                  console_exec(tell => $cmd_user => "Material $id is in the creation blacklist.");
+                  next;
+                }
+              }
+              my $maxcreate = -e "$cmddir/create/max" ? cat("$cmddir/create/max") : 64;
+              $count = $maxcreate if $count > $maxcreate;
+              while ($count > 0) {
+                my $amount = $count > 64 ? 64 : $count;
+                $count -= $amount;
+                console_exec(give => $cmd_user, $id, $amount);
+              }
+            }
+          } elsif ($cmd_name eq 'tp' && $cmd_args =~ /^([\w\-]+)$/) {
+            my ($dest) = ($1);
+            console_exec(tp => $cmd_user, $dest);
+          } elsif ($cmd_name eq 'wp' && $cmd_args =~ /^([\w\-]+)$/) {
+            my $waypoint = "wp-" . lc($1);
+            if (!-e "$server_properties{level_name}/players/$waypoint.dat") {
+              console_exec(tell => $cmd_user => "That waypoint does not exist!");
+              next;
+            }
+            my $wp_user = $waypoint;
+            if (%wpauth) {
+              if (player_copy($waypoint, $wpauth{username})) {
+                $wp_user = $wpauth{username};
+              } else {
+                console_exec(tell => $cmd_user => "Failed to adjust player data for authenticated user; check permissions of world files");
                 next;
               }
             }
-            my $maxcreate = -e "$cmddir/create/max" ? cat("$cmddir/create/max") : 64;
-            $count = $maxcreate if $count > $maxcreate;
-            while ($count > 0) {
-              my $amount = $count > 64 ? 64 : $count;
-              $count -= $amount;
-              console_exec(give => $cmd_user, $id, $amount);
-            }
-          }
-        } elsif ($cmd_name eq 'tp' && $cmd_args =~ /^([\w\-]+)$/) {
-          my ($dest) = ($1);
-          console_exec(tp => $cmd_user, $dest);
-        } elsif ($cmd_name eq 'wp' && $cmd_args =~ /^([\w\-]+)$/) {
-          my $waypoint = "wp-" . lc($1);
-          if (!-e "$server_properties{level_name}/players/$waypoint.dat") {
-            console_exec(tell => $cmd_user => "That waypoint does not exist!");
-            next;
-          }
-          my $wp_user = $waypoint;
-          if (%wpauth) {
-            if (player_copy($waypoint, $wpauth{username})) {
-              $wp_user = $wpauth{username};
-            } else {
-              console_exec(tell => $cmd_user => "Failed to adjust player data for authenticated user; check permissions of world files");
+            my $wp_player = player_create($wp_user);
+            if (!ref $wp_player) {
+              console_exec(tell => $cmd_user => $wp_player);
               next;
             }
-          }
-          my $wp_player = player_create($wp_user);
-          if (!ref $wp_player) {
-            console_exec(tell => $cmd_user => $wp_player);
-            next;
-          }
-          console_exec(tp => $cmd_user, $wp_user);
-          player_destroy($wp_player);
-          player_copy($wpauth{username}, $waypoint) if %wpauth;
-        } elsif ($cmd_name eq 'wp-set' && $cmd_args =~ /^([\w\-]+)$/) {
-          my $waypoint = "wp-" . lc($1);
-          my $wp_user = $waypoint;
-          if (%wpauth) {
-            if (!-e "$server_properties{level_name}/players/$waypoint.dat" || player_copy($waypoint, $wpauth{username})) {
-              $wp_user = $wpauth{username};
-            } else {
-              console_exec(tell => $cmd_user => "Failed to adjust player data for authenticated user; check permissions of world files");
+            console_exec(tp => $cmd_user, $wp_user);
+            player_destroy($wp_player);
+            player_copy($wpauth{username}, $waypoint) if %wpauth;
+          } elsif ($cmd_name eq 'wp-set' && $cmd_args =~ /^([\w\-]+)$/) {
+            my $waypoint = "wp-" . lc($1);
+            my $wp_user = $waypoint;
+            if (%wpauth) {
+              if (!-e "$server_properties{level_name}/players/$waypoint.dat" || player_copy($waypoint, $wpauth{username})) {
+                $wp_user = $wpauth{username};
+              } else {
+                console_exec(tell => $cmd_user => "Failed to adjust player data for authenticated user; check permissions of world files");
+                next;
+              }
+            }
+            my $wp_player = player_create($wp_user);
+            if (!ref $wp_player) {
+              console_exec(tell => $cmd_user => $wp_player);
               next;
             }
-          }
-          my $wp_player = player_create($wp_user);
-          if (!ref $wp_player) {
-            console_exec(tell => $cmd_user => $wp_player);
-            next;
-          }
-          console_exec(tp => $wp_user, $cmd_user);
-          player_destroy($wp_player);
-          player_copy($wpauth{username}, $waypoint) if %wpauth;
-        } elsif ($cmd_name eq 'wp-list') {
-          opendir(PLAYERS, "$server_properties{level_name}/players/");
-          console_exec(tell => $cmd_user => join(", ", sort map {/^wp\-([\w\-]+)\.dat$/ ? $1 : ()} readdir(PLAYERS)));
-          closedir(PLAYERS);
-        } elsif ($cmd_name eq 'list') {
-          console_exec('list');
-          $want_list = $cmd_user;
-        } elsif ($cmd_name eq 'buy' && $cmd_args =~ /^([\w\-]+)(?:\s+(\d+))$/) {
-          my ($item, $amount) = ($1, $2||1);
-          if (!-d "$tztk_dir/payment/$item/cost") {
-            console_exec(tell => $cmd_user => "That item is not for sale!");
-            next;
-          } else {
-            push @{$payments_pending{$cmd_user}}, {
-              item => $item,
-              amount => $amount,
-            };
-            console_exec(tell => $cmd_user => "You will buy $amount $item using items in your inventory the next time you log out.");
-          }
-        } elsif ($cmd_name eq 'bank-list') {
-          my $bank_dir = "$server_properties{level_name}/players/tztk/bank/$cmd_user";
-          if (!-d $bank_dir) {
-            console_exec(tell => $cmd_user => "You don't even have a bank!");
-            next;
-          }
+            console_exec(tp => $wp_user, $cmd_user);
+            player_destroy($wp_player);
+            player_copy($wpauth{username}, $waypoint) if %wpauth;
+          } elsif ($cmd_name eq 'wp-list') {
+            opendir(PLAYERS, "$server_properties{level_name}/players/");
+            console_exec(tell => $cmd_user => join(", ", sort map {/^wp\-([\w\-]+)\.dat$/ ? $1 : ()} readdir(PLAYERS)));
+            closedir(PLAYERS);
+          } elsif ($cmd_name eq 'list') {
+            console_exec('list');
+            $want_list = $cmd_user;
+          } elsif ($cmd_name eq 'buy' && $cmd_args =~ /^([\w\-]+)(?:\s+(\d+))$/) {
+            my ($item, $amount) = ($1, $2||1);
+            if (!-d "$tztk_dir/payment/$item/cost") {
+              console_exec(tell => $cmd_user => "That item is not for sale!");
+              next;
+            } else {
+              push @{$payments_pending{$cmd_user}}, {
+                item => $item,
+                amount => $amount,
+              };
+              console_exec(tell => $cmd_user => "You will buy $amount $item using items in your inventory the next time you log out.");
+            }
+          } elsif ($cmd_name eq 'bank-list') {
+            my $bank_dir = "$server_properties{level_name}/players/tztk/bank/$cmd_user";
+            if (!-d $bank_dir) {
+              console_exec(tell => $cmd_user => "You don't even have a bank!");
+              next;
+            }
 
-          my %bank;
-          opendir(BANKDIR, $bank_dir);
-          $bank{$_} = cat("$bank_dir/$_") foreach grep {!/^\./} readdir BANKDIR;
-          closedir BANKDIR;
+            my %bank;
+            opendir(BANKDIR, $bank_dir);
+            $bank{$_} = cat("$bank_dir/$_") foreach grep {!/^\./} readdir BANKDIR;
+            closedir BANKDIR;
 
-          delete $bank{$_} foreach grep {!$bank{$_}} keys %bank;
+            delete $bank{$_} foreach grep {!$bank{$_}} keys %bank;
 
-          if (!%bank) {
-            console_exec(tell => $cmd_user => "Your bank is empty.");
-            next;
+            if (!%bank) {
+              console_exec(tell => $cmd_user => "Your bank is empty.");
+              next;
+            }
+
+            console_exec(tell => $cmd_user => "Your bank: " . join(", ", map {"$_($bank{$_})"} sort keys %bank));
+          } elsif ($cmd_name eq 'buy-list') {
+            my $pay_dir = "$tztk_dir/payment";
+            my %cost;
+            opendir(PDIR, $pay_dir);
+            foreach my $item (grep {!/^\./} readdir(PDIR)) {
+              my $cost_dir = "$pay_dir/$item/cost";
+              opendir(CDIR, $cost_dir);
+              $cost{$item}{$_} = cat("$cost_dir/$_") foreach grep {!/^\./} readdir CDIR;
+              closedir CDIR;
+            }
+            closedir(PDIR);
+
+            console_exec(tell => $cmd_user => join("; ", map {my $item = $_; "$item(" . join(", ", map {"$_($cost{$item}{$_})"} sort{$a<=>$b}keys %{$cost{$item}}) . ")"} sort keys %cost));
           }
-
-          console_exec(tell => $cmd_user => "Your bank: " . join(", ", map {"$_($bank{$_})"} sort keys %bank));
-        } elsif ($cmd_name eq 'buy-list') {
-          my $pay_dir = "$tztk_dir/payment";
-          my %cost;
-          opendir(PDIR, $pay_dir);
-          foreach my $item (grep {!/^\./} readdir(PDIR)) {
-            my $cost_dir = "$pay_dir/$item/cost";
-            opendir(CDIR, $cost_dir);
-            $cost{$item}{$_} = cat("$cost_dir/$_") foreach grep {!/^\./} readdir CDIR;
-            closedir CDIR;
-          }
-          closedir(PDIR);
-
-          console_exec(tell => $cmd_user => join("; ", map {my $item = $_; "$item(" . join(", ", map {"$_($cost{$item}{$_})"} sort{$a<=>$b}keys %{$cost{$item}}) . ")"} sort keys %cost));
         }
-      }
+      } #/while(mcout)
     } elsif ($irc && $fh == $irc->{socket}) {
       if (!irc_read($irc)) {
         $sel->remove($irc->{socket});
