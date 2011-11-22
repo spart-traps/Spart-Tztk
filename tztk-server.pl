@@ -13,8 +13,9 @@ use POSIX qw(strftime);
 use IO::Uncompress::Gunzip qw(gunzip);
 use IO::Compress::Gzip qw(gzip);
 use LWP::UserAgent;
+use Encode;
 
-my $protocol_version = 11;
+my $protocol_version = 0x16;
 my $client_version = 99;
 my $server_memory = "1024M";
 
@@ -22,13 +23,13 @@ my $server_memory = "1024M";
 my %packet; %packet = (
   cs_long => sub { pack("N", unpack("L", pack("l", $_[0]))) },
   cs_short => sub { pack("n", unpack("S", pack("s", $_[0]))) },
-  cs_string => sub { $packet{cs_short}(length $_[0]) . $_[0] },
+  cs_string => sub { $packet{cs_short}(length $_[0]) . encode("UCS-2BE", decode("UTF-8",$_[0])) },
   sc_short => sub { unpack("s", pack("S", unpack("n", $_[0]))) },
   cs_keepalive => sub { #()
     chr(0x00);
   },
   cs_login => sub { #(user, pass)
-    chr(0x01) . $packet{cs_long}($protocol_version)  . $packet{cs_string}($_[0]) . $packet{cs_string}($_[1]) . ("\0" x 9);
+    chr(0x01) . $packet{cs_long}($protocol_version)  . $packet{cs_string}($_[0]) . $packet{cs_string}($_[1]) . ("\0" x 14);
   },
   cs_disconnect => sub { #(reason)
     chr(0xff) . $packet{cs_string}($_[0]);
