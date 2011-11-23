@@ -295,7 +295,14 @@ while (kill 0 => $server_pid) {
             console_exec(tell => $cmd_user => "You have $paid more use".($paid==1 ? "" : "s")." of -$cmd_name remaining.");
           }
 
-          if ($cmd_name eq 'create' && $cmd_args =~ /^(\d+)(?:\s*\D+?\s*(\d+))?|([a-z][\w\-]*)$/) {
+          if ($cmd_name eq 'help' && -e "$tztk_dir/help" && open(HELP, "$tztk_dir/help")) {
+            while (<HELP>) {
+              chomp;
+              next unless /\S/;
+              console_exec(tell => $cmd_user => $_);
+            }
+            close HELP;
+          } elsif ($cmd_name eq 'create' && $cmd_args =~ /^(\d+)(?:\s*\D+?\s*(\d+))?|([a-z][\w\-]*)$/) {
             my ($id, $count, $kit) = ($1, $2||1, lc $3);
             my @create;
             if ($kit) {
