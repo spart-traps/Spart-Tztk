@@ -59,8 +59,11 @@ my %packet; %packet = (
   },
 );
 
-
+# localization init
 my $tztk_dir = cat("tztk-dir") || "tztk";
+require "$tztk_dir/L10N.pm";
+my $l10n = L10N->get_handle() || die "Sorry, no usable language.";
+
 my $cmddir = "$tztk_dir/allowed-commands";
 my $snapshotdir = "$tztk_dir/snapshots";
 my %msgcolor = (info => 36, warning => 33, error => 31, tztk => 32, chat => 35);
@@ -70,7 +73,7 @@ my $ua = new LWP::UserAgent; $ua->agent("tztk");
 
 # load server properties
 my %server_properties;
-open(SERVERPROPERTIES, "server.properties") or die "failed to load server properties: $!";
+open(SERVERPROPERTIES, "server.properties") or die $l10n->maketext("failed to load server properties: [_1]", $!);
 while (<SERVERPROPERTIES>) {
   next if /^\s*\#/;
   next unless /^\s*([\w\-]+)\s*\=\s*(.*?)\s*$/;
@@ -81,7 +84,7 @@ while (<SERVERPROPERTIES>) {
 close SERVERPROPERTIES;
 $server_properties{server_ip} ||= "localhost";
 $server_properties{server_port} ||= 25565;
-print color(tztk => "Minecraft server appears to be at $server_properties{server_ip}:$server_properties{server_port}\n");
+print color(tztk => $l10n->maketext("Minecraft server appears to be at [_1]:[_2]\n", $server_properties{server_ip},$server_properties{server_port}));
 
 # load waypoint authentication
 my %wpauth;
@@ -91,7 +94,7 @@ if (-d "$tztk_dir/waypoint-auth") {
   my $sessiondata = mcauth_startsession($wpauth{username}, $wpauth{password});
 
   if (!ref $sessiondata) {
-    print color(tztk => "Failed to authenticate with waypoint-auth user $wpauth{username}: $sessiondata\n");
+    print color(tztk => $l10n->maketext("Failed to authenticate with waypoint-auth user [_1]: [_2]\n", $wpauth{username}, $sessiondata));
     %wpauth = ();
   } else {
     $wpauth{username} = $sessiondata->{username};
@@ -115,7 +118,7 @@ my $server_pid = 0;
 $SIG{PIPE} = sub { print color(error => "SIGPIPE (\$?=$?, k0=".(kill 0 => $server_pid).", \$!=$!)\n"); };
 $server_pid = open2(\*MCOUT, \*MCIN, "java -Xmx$server_memory -Xms$server_memory -jar minecraft_server.jar nogui 2>&1");
 MCOUT->blocking(0);
-print "Minecraft SMP Server launched with pid $server_pid\n";
+print $l10n->maketext("Minecraft SMP Server launched with pid [_1]\n", $server_pid);
 
 my (@players, %payments_pending, $want_list);
 my $server_ready = 0;
@@ -140,7 +143,7 @@ while (kill 0 => $server_pid) {
       }
     } elsif ($fh == \*MCOUT) {
       if (eof(MCOUT)) {
-        print "Minecraft server seems to have shut down.  Exiting...\n";
+        print $l10n->maketext("Minecraft server seems to have shut down.  Exiting...\n") ;
         exit;
       }
       while (my $mc = <MCOUT>) {
@@ -190,15 +193,15 @@ while (kill 0 => $server_pid) {
             }
             if ($whitelist_active && !$whitelist_passed) {
               console_exec(kick => $username);
-              console_exec(say => "$username tried to join, but was not on any active whitelist");
+              console_exec(say => $l10n->maketext("[_1] tried to join, but was not on any active whitelist", $username));
               next;
             }
           }
 
-          irc_send($irc, "$username has connected") if $irc && player_is_human($username);
+          irc_send($irc, $l10n->maketext("[_1] has connected", $username)) if $irc && player_is_human($username);
 
           if (player_is_human($username) && -e "$tztk_dir/motd" && open(MOTD, "$tztk_dir/motd")) {
-            console_exec(tell => $username => "Message of the day:");
+            console_exec(tell => $username => $l10n->maketext("Message of the day:"));
             while (<MOTD>) {
               chomp;
               next unless /\S/;
@@ -212,7 +215,7 @@ while (kill 0 => $server_pid) {
         # Username lost connection: Quitting
         } elsif ($mc =~ /^([\w\-]+)\s+lost\s+connection\:\s*(.+?)\s*$/) {
           my ($username, $reason) = ($1, $2);
-          irc_send($irc, "$username has disconnected: $reason") if $irc && player_is_human($username);
+          irc_send($irc, $l10n->maketext("[_1] has disconnected: [_2]", $username, $reason)) if $irc && player_is_human($username);
           if (exists $payments_pending{$username}) {
             my $bank_dir = "$server_properties{level_name}/players/tztk";
             mkdir $bank_dir unless -d $bank_dir;
@@ -283,7 +286,7 @@ while (kill 0 => $server_pid) {
             my $bank_file = "$server_properties{level_name}/players/tztk/bank/$cmd_user/$cmd_name";
             my $paid = cat($bank_file);
             if (!$paid) {
-              console_exec(tell => $cmd_user => "You must pay to use -$cmd_name!  (Try -buy-list to see what.)");
+              console_exec(tell => $cmd_user => $l10n->maketext("You must pay to use -[_1]!  (Try -buy-list to see what.)", $cmd_name));
               next;
             }
 
@@ -292,7 +295,7 @@ while (kill 0 => $server_pid) {
             print BANKFILE $paid;
             close BANKFILE;
 
-            console_exec(tell => $cmd_user => "You have $paid more use".($paid==1 ? "" : "s")." of -$cmd_name remaining.");
+            console_exec(tell => $cmd_user => $l10n->maketext("You have [_1] more [quant, _1, use, uses] of -[_2] remaining.", $paid, $cmd_name));
           }
 
           if ($cmd_name eq 'help' && -e "$tztk_dir/help" && open(HELP, "$tztk_dir/help")) {
@@ -307,7 +310,7 @@ while (kill 0 => $server_pid) {
             my @create;
             if ($kit) {
               if (!-e "$cmddir/create/kits/$kit") {
-                console_exec(tell => $cmd_user => "That is not a known kit.");
+                console_exec(tell => $cmd_user => $l10n->maketext("That is not a known kit."));
                 next;
               }
               open(KIT, "$cmddir/create/kits/$kit");
@@ -317,7 +320,7 @@ while (kill 0 => $server_pid) {
               }
 
               if (!@create) {
-                console_exec(tell => $cmd_user => "Nothing to create!  Is the kit defined correctly?");
+                console_exec(tell => $cmd_user => $l10n->maketext("Nothing to create!  Is the kit defined correctly?"));
                 next
               }
             } else {
@@ -350,7 +353,7 @@ while (kill 0 => $server_pid) {
           } elsif ($cmd_name eq 'wp' && $cmd_args =~ /^([\w\-]+)$/) {
             my $waypoint = "wp-" . lc($1);
             if (!-e "$server_properties{level_name}/players/$waypoint.dat") {
-              console_exec(tell => $cmd_user => "That waypoint does not exist!");
+              console_exec(tell => $cmd_user => $l10n->maketext("That waypoint does not exist!"));
               next;
             }
             my $wp_user = $waypoint;
@@ -358,7 +361,7 @@ while (kill 0 => $server_pid) {
               if (player_copy($waypoint, $wpauth{username})) {
                 $wp_user = $wpauth{username};
               } else {
-                console_exec(tell => $cmd_user => "Failed to adjust player data for authenticated user; check permissions of world files");
+                console_exec(tell => $cmd_user => $l10n->maketext("Failed to adjust player data for authenticated user; check permissions of world files"));
                 next;
               }
             }
@@ -377,7 +380,7 @@ while (kill 0 => $server_pid) {
               if (!-e "$server_properties{level_name}/players/$waypoint.dat" || player_copy($waypoint, $wpauth{username})) {
                 $wp_user = $wpauth{username};
               } else {
-                console_exec(tell => $cmd_user => "Failed to adjust player data for authenticated user; check permissions of world files");
+                console_exec(tell => $cmd_user => $l10n->maketext("Failed to adjust player data for authenticated user; check permissions of world files"));
                 next;
               }
             }
@@ -399,14 +402,14 @@ while (kill 0 => $server_pid) {
           } elsif ($cmd_name eq 'buy' && $cmd_args =~ /^([\w\-]+)(?:\s+(\d+))$/) {
             my ($item, $amount) = ($1, $2||1);
             if (!-d "$tztk_dir/payment/$item/cost") {
-              console_exec(tell => $cmd_user => "That item is not for sale!");
+              console_exec(tell => $cmd_user => $l10n->maketext("That item is not for sale!"));
               next;
             } else {
               push @{$payments_pending{$cmd_user}}, {
                 item => $item,
                 amount => $amount,
               };
-              console_exec(tell => $cmd_user => "You will buy $amount $item using items in your inventory the next time you log out.");
+              console_exec(tell => $cmd_user => $l10n->maketext("You will buy [_1] [_2] using items in your inventory the next time you log out.", $amount, $item));
             }
           } elsif ($cmd_name eq 'bank-list') {
             my $bank_dir = "$server_properties{level_name}/players/tztk/bank/$cmd_user";
@@ -423,11 +426,11 @@ while (kill 0 => $server_pid) {
             delete $bank{$_} foreach grep {!$bank{$_}} keys %bank;
 
             if (!%bank) {
-              console_exec(tell => $cmd_user => "Your bank is empty.");
+              console_exec(tell => $cmd_user => $l10n->maketext("Your bank is empty."));
               next;
             }
 
-            console_exec(tell => $cmd_user => "Your bank: " . join(", ", map {"$_($bank{$_})"} sort keys %bank));
+            console_exec(tell => $cmd_user => $l10n->maketext("Your bank: ") . join(", ", map {"$_($bank{$_})"} sort keys %bank));
           } elsif ($cmd_name eq 'buy-list') {
             my $pay_dir = "$tztk_dir/payment";
             my %cost;
@@ -469,7 +472,7 @@ while (kill 0 => $server_pid) {
   select undef, undef, undef, .01;
 }
 
-print "Can no longer reach server at pid $server_pid; is it dead?  Exiting...\n";
+print $l10n->maketext("Can no longer reach server at pid [_1]; is it dead?  Exiting...\n", $server_pid);
 
 sub color {
   my ($color, $message) = (lc $_[0], $_[1]);
@@ -488,7 +491,7 @@ sub snapshot_begin {
 }
 
 sub snapshot_finish {
-  console_exec(say => "Creating snapshot...");
+  console_exec(say => $l10n->maketext("Creating snapshot..."));
   my $snapshot_name = strftime('snapshot-%Y-%m-%d-%H-%M-%S.tgz', localtime);
   my $tar_pid = open2(\*TAROUT, \*TARIN, "tar", "-czvhf", "$snapshotdir/$snapshot_name", '--', $server_properties{level_name});
   close TARIN;
@@ -512,25 +515,25 @@ sub snapshot_finish {
     }
   }
 
-  console_exec(say => "Snapshot complete! (Saved $tar_count files.)");
+  console_exec(say => $l10n->maketext("Snapshot complete! (Saved [_1] files.)", $tar_count));
 }
 
 sub player_create {
   my $username = lc $_[0];
-  return "can't create fake player, server must set online-mode=false or provide a real user in $tztk_dir/waypoint-auth" unless %wpauth || $server_properties{online_mode} eq 'false';
-  return "invalid name" unless $username =~ /^[\w\-]+$/;
+  return $l10n->maketext("can't create fake player, server must set online-mode=false or provide a real user in [_1]/waypoint-auth", $tztk_dir) unless %wpauth || $server_properties{online_mode} eq 'false';
+  return $l10n->maketext("invalid name") unless $username =~ /^[\w\-]+$/;
 
   my $player = IO::Socket::INET->new(
     Proto     => "tcp",
     PeerAddr  => $server_properties{server_ip},
     PeerPort  => $server_properties{server_port},
-  ) or return "can't connect: $!";
+  ) or return $l10n->maketext("can't connect: [_1]", $!);
 
   if (%wpauth) {
     print $player $packet{cs_handshake}($username);
     while (1) {
       my $packet = $packet{sc_readnext}($player);
-      die "totally unexpected packet; did the protocol change?" unless defined $packet;
+      die $l10n->maketext("totally unexpected packet; did the protocol change?") unless defined $packet;
       return $packet->{message} if $packet->{type} eq 'sc_disconnect';
       if ($packet->{type} eq 'sc_handshake') {
         my $status = mcauth_joinserver($username, $wpauth{session_id}, $packet->{server_id});
@@ -604,7 +607,7 @@ sub cat {
 sub irc_connect {
   my $conf = shift;
 
-  print color(tztk => "Connecting to IRC...\n");
+  print color(tztk => $l10n->maketext("Connecting to IRC...\n"));
 
   my $irc = irc_init($conf);
 
@@ -614,7 +617,7 @@ sub irc_connect {
   }
 
   print $irc "JOIN $conf->{channel}\r\n";
-  print color(tztk => "Connected to IRC successfully!\n");
+  print color(tztk => $l10n->maketext("Connected to IRC successfully!\n"));
 
   $conf->{socket} = $irc;
   return $conf;
@@ -627,7 +630,7 @@ sub irc_init {
     PeerAddr => $conf->{host},
     PeerPort => $conf->{port},
     Proto    => 'tcp'
-  ) or return "couldn't connect to irc server: $!";
+  ) or return $l10n->maketext("couldn't connect to irc server: [_1]", $!);
 
   print $irc "NICK $conf->{nick}\r\n";
   print $irc "USER $conf->{nick} 8 * :Minecraft-IRC proxy bot\r\n";
@@ -638,7 +641,7 @@ sub irc_init {
     } elsif (/^\:[\w\-\.]+\s+004\b/) {
       last;
     } elsif (/^\:[w\-\.]+\s+433\b/) {
-      return "couldn't connect to irc server: nick is in use";
+      return $l10n->maketext("couldn't connect to irc server: nick is in use");
     }
   }
 
@@ -664,14 +667,14 @@ sub irc_read {
     if (uc $args[0] eq 'PRIVMSG') {
       my ($channel, $msg) = @args[1,2];
       if ($msg =~ /^\s*\-list\s*$/) {
-        irc_send($irc, "Connected players: " . join(', ', @players));
+        irc_send($irc, $l10n->maketext("Connected players: ") . join(', ', @players));
       } else {
         console_exec(say => "<$nick> $args[2]");
       }
     } elsif (uc $args[0] eq 'JOIN') {
-      console_exec(say => "$nick has joined the IRC channel");
+      console_exec(say => $l10n->maketext("[_1] has joined the IRC channel", $nick));
     } elsif (uc $args[0] eq 'PART') {
-      console_exec(say => "$nick has left the IRC channel");
+      console_exec(say => $l10n->maketext("[_1] has left the IRC channel", $nick));
     }
   }
 
