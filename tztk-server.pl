@@ -297,8 +297,35 @@ while (kill 0 => $server_pid) {
 
             console_exec(tell => $cmd_user => $l10n->maketext("You have [quant,_1,more use,more uses] of -[_2] remaining.", $paid, $cmd_name));
           }
-
-          if ($cmd_name eq 'help' && -e "$tztk_dir/help" && open(HELP, "$tztk_dir/help")) {
+          if ($cmd_name eq 'seen' && $cmd_args =~ /^[\w\-\"\_]+$/) {
+            my $query = $&;
+            my @players = <$server_properties{level_name}/players/*.dat>;
+            map { s/^.*\/(.*?)\.dat$/$1/ } @players;
+            my @matches = grep(/$query/i,  @players);
+            my $time = time;
+            open(PLAYERS, "$tztk_dir/players.txt");
+            my @connected = <PLAYERS>;
+            close PLAYERS;
+            foreach my $match (@matches) {
+               player_is_human($match) or next;
+               if (grep(/^$match$/, @connected)) {
+                 console_exec(tell => $cmd_user => $l10n->maketext("[_1] is currently connected.", $match));
+                 next;
+               }
+               my $mtime = (stat("$server_properties{level_name}/players/".$match.".dat"))[9];
+               my $since = $time-$mtime;
+               my ($days, $hours, $mins, $secs); 
+               $days = int($since/(60*60*24));
+               $since %= 60*60*24;
+               $hours = int($since/(60*60));
+               $since %= (60*60);
+               $mins = int($since/60);
+               $secs = $since % 60;
+               console_exec(tell => $cmd_user => $l10n->maketext("[_1] hasn't been seen around since [quant,_2,day,days], [quant,_3,hour,hours], [quant,_4,minute,minutes], [quant,_5,second,seconds].",
+                            $match, $days, $hours, $mins, $secs));
+            }
+            console_exec(tell => $cmd_user => $l10n->maketext("[_1] has never been seen around.", $query)) unless @matches;
+          } elsif ($cmd_name eq 'help' && -e "$tztk_dir/help" && open(HELP, "$tztk_dir/help")) {
             while (<HELP>) {
               chomp;
               next unless /\S/;
