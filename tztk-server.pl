@@ -295,7 +295,7 @@ while (kill 0 => $server_pid) {
             print BANKFILE $paid;
             close BANKFILE;
 
-            console_exec(tell => $cmd_user => $l10n->maketext("You have [_1] more [quant, _1, use, uses] of -[_2] remaining.", $paid, $cmd_name));
+            console_exec(tell => $cmd_user => $l10n->maketext("You have [quant,_1,more use,more uses] of -[_2] remaining.", $paid, $cmd_name));
           }
 
           if ($cmd_name eq 'help' && -e "$tztk_dir/help" && open(HELP, "$tztk_dir/help")) {
