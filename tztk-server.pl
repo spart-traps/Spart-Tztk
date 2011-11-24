@@ -333,7 +333,7 @@ while (kill 0 => $server_pid) {
             }
             close HELP;
           } elsif ($cmd_name eq 'create' && $cmd_args =~ /^(\d+)(?:\s*\D+?\s*(\d+))?|([a-z][\w\-]*)$/) {
-            my ($id, $count, $kit) = ($1, $2||1, lc $3);
+            my ($id, $count, $kit) = ($1, $2||($3 ? 1:64), lc $3);
             my @create;
             if ($kit) {
               if (!-e "$cmddir/create/kits/$kit") {
