@@ -441,7 +441,7 @@ while (kill 0 => $server_pid) {
           } elsif ($cmd_name eq 'bank-list') {
             my $bank_dir = "$server_properties{level_name}/players/tztk/bank/$cmd_user";
             if (!-d $bank_dir) {
-              console_exec(tell => $cmd_user => "You don't even have a bank!");
+              console_exec(tell => $cmd_user => $l10n->maketext("You don't even have a bank!"));
               next;
             }
 
