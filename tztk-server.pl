@@ -317,7 +317,7 @@ while (kill 0 => $server_pid) {
             foreach my $match (@matches) {
                player_is_human($match) or next;
                if (grep(/^$match$/, @connected)) {
-                 console_exec(tell => $cmd_user => $l10n->maketext("[_1] is currently connected.", $match));
+                 console_exec(say => $l10n->maketext("[_1] is currently connected.", $match));
                  next;
                }
                my $mtime = (stat("$server_properties{level_name}/players/".$match.".dat"))[9];
@@ -329,10 +329,10 @@ while (kill 0 => $server_pid) {
                $since %= (60*60);
                $mins = int($since/60);
                $secs = $since % 60;
-               console_exec(tell => $cmd_user => $l10n->maketext("[_1] hasn't been seen around since [quant,_2,day,days], [quant,_3,hour,hours], [quant,_4,minute,minutes], [quant,_5,second,seconds].",
+               console_exec(say => $l10n->maketext("[_1] hasn't been seen around since [quant,_2,day,days], [quant,_3,hour,hours], [quant,_4,minute,minutes], [quant,_5,second,seconds].",
                             $match, $days, $hours, $mins, $secs));
             }
-            console_exec(tell => $cmd_user => $l10n->maketext("[_1] has never been seen around.", $query)) unless @matches;
+            console_exec(say => $l10n->maketext("[_1] has never been seen around.", $query)) unless @matches;
           } elsif ($cmd_name eq 'help' && -e "$tztk_dir/help" && open(HELP, "$tztk_dir/help")) {
             while (<HELP>) {
               chomp;
