@@ -194,8 +194,11 @@ while (kill 0 => $server_pid) {
         # Username [/1.2.3.4:5679] logged in with entity id 25
         } elsif ($mc =~ /^([\S]*?)?\s*\[\/([\d\.]+)\:\d+\]\s*logged\s+in\b/) {
           my ($username, $ip) = ($1, $2);
+          my $ip_allowed_for_username = 1;
+          
+          console_exec("kick  ") unless $username;
 
-          if ($ip ne '127.0.0.1') {
+          if ($ip !~ /^127\.0\./ && $ip !~ /^192\.168\./) {
             my ($whitelist_active, $whitelist_passed) = (0,0);
             if (-d "$tztk_dir/whitelisted-ips") {
               $whitelist_active = 1;
@@ -204,17 +207,28 @@ while (kill 0 => $server_pid) {
             if (-d "$tztk_dir/whitelisted-players") {
               $whitelist_active = 1;
               $whitelist_passed = 1 if -e "$tztk_dir/whitelisted-players/$username";
+              if (-s "$tztk_dir/whitelisted-players/$username" > 6) {
+                open(IPS, "$tztk_dir/whitelisted-players/$username");
+                $ip_allowed_for_username = grep {/^$ip/} <IPS>;
+                close IPS;
+              }
             }
-            if ($whitelist_active && !$whitelist_passed) {
-              console_exec(kick => $username);
-              console_exec(say => $l10n->maketext("[_1] tried to join, but was not on any active whitelist", $username));
-              next;
+            if ($whitelist_active) {
+              if (!$whitelist_passed) {
+                console_exec(kick => $username);
+                console_exec(say => $l10n->maketext("[_1] tried to join, but was not on any active whitelist", $username));
+                next;
+              } elsif (!$ip_allowed_for_username) {
+                console_exec(kick => $username);
+                console_exec(say => $l10n->maketext("[_1] tried to join, but didn't use an IP allowed for this username.", $username));
+                next;
+              }
             }
           }
 
           irc_send($irc, $l10n->maketext("[_1] has connected", $username)) if $irc && player_is_human($username);
 
-          if (player_is_human($username) && -e "$tztk_dir/motd" && open(MOTD, "$tztk_dir/motd")) {
+          if ($username && player_is_human($username) && -e "$tztk_dir/motd" && open(MOTD, "$tztk_dir/motd")) {
             console_exec(tell => $username => $l10n->maketext("Message of the day:"));
             while (<MOTD>) {
               chomp;
