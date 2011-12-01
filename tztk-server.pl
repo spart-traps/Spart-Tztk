@@ -120,7 +120,9 @@ $server_pid = open2(\*MCOUT, \*MCIN, "java -Xmx$server_memory -Xms$server_memory
 MCOUT->blocking(0);
 print $l10n->maketext("Minecraft SMP Server launched with pid [_1]\n", $server_pid);
 
-my (@players, %payments_pending, $want_list);
+my (@players, %payments_pending, $want_list, $shutdown_scheduled, $downtime_estimate);
+my $last_time = 0;
+my $next_snapshot_test = 0;
 my $server_ready = 0;
 my $want_snapshot = 0;
 
@@ -138,6 +140,18 @@ while (kill 0 => $server_pid) {
       }
       if ($stdin =~ /^\-snapshot\s*$/) {
         snapshot_begin();
+      } elsif($stdin =~ /^\-shutdown\s*([\-\d]*)\s*(\d*)/) {
+        my $delay = $1 || 5;
+        my $downtime = $2;
+        if ($delay < 0) {
+          $shutdown_scheduled and console_exec(say => $l10n->maketext("Shutdown cancelled."));
+          $shutdown_scheduled = 0;
+          next;
+        } elsif ($delay > 180) {
+          $delay = 180;
+        }
+        $shutdown_scheduled = time + ($delay*60);
+        $downtime_estimate = $downtime;
       } else {
         print MCIN $stdin;
       }
@@ -539,7 +553,8 @@ while (kill 0 => $server_pid) {
 
   # snapshots
   my $snapshot_period;
-  if ($snapshot_period = cat("$tztk_dir/snapshot-period")) {
+  if (!$want_snapshot and (time > $next_snapshot_test) and $snapshot_period = cat("$tztk_dir/snapshot-period")) {
+    $next_snapshot_test = time + 60;
     if ($snapshot_period =~ /^\d+$/) {
       mkdir $snapshotdir unless -d $snapshotdir;
       if (!-e "$snapshotdir/latest" || time - (stat("$snapshotdir/latest"))[9] >= $snapshot_period) {
@@ -547,6 +562,28 @@ while (kill 0 => $server_pid) {
       }
     }
   }
+
+  # shutdown broadcast
+  if ($shutdown_scheduled and time > $last_time) {
+    $last_time = time;
+    my $remaining = $shutdown_scheduled-$last_time;
+    my $do_broadcast = 0;
+    if (int($remaining/3600) > 0) {
+      not $remaining%3600 and
+        console_exec(say => $l10n->maketext("The server is going DOWN for maintenance in [quant,_1,hour,hours]. Estimated downtime: [quant,_2,minute,minutes,undefined]",
+          int(($remaining+1)/3600), $downtime_estimate));
+    } elsif (int($remaining/1800)>0) { $do_broadcast = not ($remaining%1800);}
+      elsif (int($remaining/600)>0)  { $do_broadcast = not ($remaining%600);}
+      elsif (int($remaining/300)>0)  { $do_broadcast = not ($remaining%300);}
+      elsif (int($remaining/60)>0)   { $do_broadcast = not ($remaining%60);}
+      elsif ($remaining <= 0 and !$want_snapshot) {
+      $shutdown_scheduled = 0;
+      console_exec('stop');
+    }
+    $do_broadcast and  console_exec(say => $l10n->maketext("The server is going DOWN for maintenance in [quant,_1,minute,minutes]. Estimated downtime: [quant,_2,minute,minutes,undefined]",
+      int($remaining/60), $downtime_estimate));
+  }
+
 } continue {
   # in case of unexpected catastrophic i/o errors, yield to prevent spinlock
   select undef, undef, undef, .01;
@@ -598,6 +635,19 @@ sub snapshot_finish {
   console_exec(say => $l10n->maketext("Snapshot complete! (Saved [_1] files.)", $tar_count));
 }
 
+sub schedule_shutdown {
+  my $delay = shift || 5;
+  my $downtime = shift;
+  my $shutdown_scheduled = shift;
+  if ($delay < 0) {
+    $shutdown_scheduled and console_exec(say => $l10n->maketext("Shutdown cancelled."));
+    $shutdown_scheduled = 0;
+    return;
+  } elsif ($delay > 180) {
+    $delay = 180;
+  }
+  return (time+$delay*60, $downtime, $shutdown_scheduled);
+}
 
 sub ensure_players_dir {
   my $tztk_dir = "$server_properties{level_name}/players/tztk";
