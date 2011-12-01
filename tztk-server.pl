@@ -152,7 +152,7 @@ while (kill 0 => $server_pid) {
         ($msgprefix, $msgtype) = ($1, lc $2) if $mc =~ s/^([\d\-\s\:]*\[(\w+)\]\s*)//;
         $msgprefix = strftime('%F %T [MISC] ', localtime) unless length $msgprefix;
         $mc =~ s/\xc2\xa7[0-9a-f]//g; #remove color codes
-        $msgtype = 'chat' if $msgtype eq 'info' && $mc =~ /^\<[\w\-]+\>\s+[^\-]/;
+        $msgtype = 'chat' if $msgtype eq 'info' && $mc =~ /^\<[\w\-\"\_]+\>\s+[^\-]/;
         print color($msgtype => $msgprefix.$mc);
 
         my ($cmd_user, $cmd_name, $cmd_args);
@@ -164,21 +164,21 @@ while (kill 0 => $server_pid) {
           console_exec('list');
         # chat messages
         # <Username> Message text here
-        } elsif ($mc =~ /^\<([\w\-]+)\>\s*(.+?)\s*$/) {
+        } elsif ($mc =~ /^\<([\w\-\"\_]+)\>\s*(.+?)\s*$/) {
           my ($username, $msg) = ($1, $2);
 
-          if ($msg =~ /^\-([\w\-]+)(?:\s+(.+?))?\s*$/) {
+          if ($msg =~ /^\-([\w\-\"\_]+)(?:\s+(.+?))?\s*$/) {
             ($cmd_user, $cmd_name, $cmd_args) = ($username, $1, $2);
           } else {
             irc_send($irc, "<$username> $msg") if $irc;
           }
         # whispers
         # 2011-01-08 21:24:10 [INFO] Topaz2078 whispers asdfasdf to nobody
-        } elsif ($mc =~ /^([\w\-]+)\s+whispers\s+(.+?)\s+to\s+\-([\w\-]+)\s$/) {
+        } elsif ($mc =~ /^([\w\-\"\_]+)\s+whispers\s+(.+?)\s+to\s+\-([\w\-\"\_]+)\s$/) {
           ($cmd_user, $cmd_name, $cmd_args) = ($1, $3, $2);
         # connection notices
         # Username [/1.2.3.4:5679] logged in with entity id 25
-        } elsif ($mc =~ /^([\w\-]+)\s*\[\/([\d\.]+)\:\d+\]\s*logged\s+in\b/) {
+        } elsif ($mc =~ /^([\S]*?)?\s*\[\/([\d\.]+)\:\d+\]\s*logged\s+in\b/) {
           my ($username, $ip) = ($1, $2);
 
           if ($ip ne '127.0.0.1') {
@@ -213,17 +213,11 @@ while (kill 0 => $server_pid) {
           console_exec('list');
         # connection lost notices
         # Username lost connection: Quitting
-        } elsif ($mc =~ /^([\w\-]+)\s+lost\s+connection\:\s*(.+?)\s*$/) {
+        } elsif ($mc =~ /^([\w\-\"\_]+)\s+lost\s+connection\:\s*(.+?)\s*$/) {
           my ($username, $reason) = ($1, $2);
           irc_send($irc, $l10n->maketext("[_1] has disconnected: [_2]", $username, $reason)) if $irc && player_is_human($username);
           if (exists $payments_pending{$username}) {
-            my $bank_dir = "$server_properties{level_name}/players/tztk";
-            mkdir $bank_dir unless -d $bank_dir;
-            $bank_dir .= "/bank";
-            mkdir $bank_dir unless -d $bank_dir;
-            $bank_dir .= "/$username";
-            mkdir $bank_dir unless -d $bank_dir;
-
+            my $bank_dir = ensure_players_dir("bank", $username);
             my $mtime = 0;
             for (1..3) {
               sleep 1;
@@ -264,7 +258,7 @@ while (kill 0 => $server_pid) {
         # userlist players.txt update
         # Connected players: Topaz2078
         } elsif ($mc =~ /^Connected\s+players\:\s*(.*?)\s*$/) {
-          @players = grep {/^[\w\-]+$/ && player_is_human($_)} split(/[^\w\-]+/, $1);
+          @players = grep {/^[\w\-\"\_]+$/ && player_is_human($_)} split(/[^\w\-\"\_]+/, $1);
           if (defined $want_list) {
             console_exec(tell => $want_list => "Connected players: " . join(', ', @players));
             $want_list = undef;
@@ -332,7 +326,7 @@ while (kill 0 => $server_pid) {
               console_exec(tell => $cmd_user => $_);
             }
             close HELP;
-          } elsif ($cmd_name eq 'create' && $cmd_args =~ /^(\d+)(?:\s*\D+?\s*(\d+))?|([a-z][\w\-]*)$/) {
+          } elsif ($cmd_name eq 'create' && $cmd_args =~ /^(\d+)(?:\s*\D+?\s*(\d+))?|([a-z][\w\-\_]*)$/) {
             my ($id, $count, $kit) = ($1, $2||($3 ? 1:64), lc $3);
             my @create;
             if ($kit) {
@@ -374,10 +368,10 @@ while (kill 0 => $server_pid) {
                 console_exec(give => $cmd_user, $id, $amount);
               }
             }
-          } elsif ($cmd_name eq 'tp' && $cmd_args =~ /^([\w\-]+)$/) {
+          } elsif ($cmd_name eq 'tp' && $cmd_args =~ /^([\w\-\"\_]+)$/) {
             my ($dest) = ($1);
             console_exec(tp => $cmd_user, $dest);
-          } elsif ($cmd_name eq 'wp' && $cmd_args =~ /^([\w\-]+)$/) {
+          } elsif ($cmd_name eq 'wp' && $cmd_args =~ /^([\w\-\"\_]+)$/) {
             my $waypoint = "wp-" . lc($1);
             if (!-e "$server_properties{level_name}/players/$waypoint.dat") {
               console_exec(tell => $cmd_user => $l10n->maketext("That waypoint does not exist!"));
@@ -400,8 +394,37 @@ while (kill 0 => $server_pid) {
             console_exec(tp => $cmd_user, $wp_user);
             player_destroy($wp_player);
             player_copy($wpauth{username}, $waypoint) if %wpauth;
-          } elsif ($cmd_name eq 'wp-set' && $cmd_args =~ /^([\w\-]+)$/) {
+          } elsif ($cmd_name eq 'wpp' && $cmd_args =~ /^([\w\-\"\_]+)$/) {
+            my $waypoint = "pp-" . lc($1);
+            if (length $waypoint > 16) {
+              console_exec(tell => $cmd_user => $l10n->maketext("Maximum length for waypoint name is 13 characters."));
+              next;
+            } elsif (-e "$server_properties{level_name}/players/$waypoint.dat"){
+              console_exec(tell => $cmd_user => $l10n->maketext("Can't use [_1] as dummy teleporter name : a player by that name already exists!", $waypoint));
+              next;
+            } elsif (!-e "$server_properties{level_name}/players/tztk/wpp/$cmd_user/$waypoint.dat") {
+              console_exec(tell => $cmd_user => $l10n->maketext("That waypoint does not exist!"));
+              next;
+            }
+            my $wp_user = %wpauth ? $wpauth{username} : $waypoint;
+            if (not player_copy_from_private($waypoint, $wp_user, $cmd_user)) {
+              console_exec(tell => $cmd_user => $l10n->maketext("Failed to adjust player data; check permissions of world files"));
+              next;
+            }
+            my $wp_player = player_create($wp_user);
+            if (!ref $wp_player) {
+              console_exec(tell => $cmd_user => $wp_player);
+              next;
+            }
+            console_exec(tp => $cmd_user, $wp_user);
+            player_destroy($wp_player);
+            player_move_to_private($wp_user, $waypoint, $cmd_user);
+          } elsif ($cmd_name eq 'wp-set' && $cmd_args =~ /^([\w\-\"\_]+)$/) {
             my $waypoint = "wp-" . lc($1);
+            if (length $waypoint > 16) {
+                console_exec(tell => $cmd_user => $l10n->maketext("Maximum length for waypoint name is 13 characters."));
+                next;
+            }
             my $wp_user = $waypoint;
             if (%wpauth) {
               if (!-e "$server_properties{level_name}/players/$waypoint.dat" || player_copy($waypoint, $wpauth{username})) {
@@ -419,14 +442,44 @@ while (kill 0 => $server_pid) {
             console_exec(tp => $wp_user, $cmd_user);
             player_destroy($wp_player);
             player_copy($wpauth{username}, $waypoint) if %wpauth;
+          } elsif ($cmd_name eq 'wpp-set' && $cmd_args =~ /^([\w\-\"\_]+)$/) {
+            my $waypoint = "pp-" . lc($1);
+            if (length $waypoint > 16) {
+              console_exec(tell => $cmd_user => $l10n->maketext("Maximum length for waypoint name is 13 characters."));
+              next;
+            } elsif (-e "$server_properties{level_name}/players/$waypoint.dat"){
+              console_exec(tell => $cmd_user => $l10n->maketext("Can't use [_1] as dummy teleporter name : a player by that name already exists!"));
+              next;
+            }
+            ensure_players_dir("wpp", $cmd_user);
+            my $wp_user = %wpauth ? $wpauth{username} : $waypoint;
+            if (-e "$server_properties{level_name}/players/tztk/wpp/$cmd_user/$waypoint.dat" and not player_copy_from_private($waypoint, $wp_user, $cmd_user)) {
+              console_exec(tell => $cmd_user => $l10n->maketext("Failed to adjust player data; check permissions of world files"));
+              next;
+            }
+            my $wp_player = player_create($wp_user);
+            if (!ref $wp_player) {
+              console_exec(tell => $cmd_user => $wp_player);
+              next;
+            }
+            console_exec(tp => $wp_user, $cmd_user);
+            player_destroy($wp_player);
+            if (!player_move_to_private($wp_user, $waypoint, $cmd_user)) {
+               console_exec(tell => $cmd_user => "Failed to save.");
+            }
           } elsif ($cmd_name eq 'wp-list') {
             opendir(PLAYERS, "$server_properties{level_name}/players/");
-            console_exec(tell => $cmd_user => join(", ", sort map {/^wp\-([\w\-]+)\.dat$/ ? $1 : ()} readdir(PLAYERS)));
+            console_exec(tell => $cmd_user => join(", ", sort map {/^wp\-([\w\-\"\_]+)\.dat$/ ? $1 : ()} readdir(PLAYERS)));
+            closedir(PLAYERS);
+          } elsif ($cmd_name eq 'wpp-list') {
+            ensure_players_dir("wpp", $cmd_user);
+            opendir(PLAYERS, "$server_properties{level_name}/players/tztk/wpp/$cmd_user");
+            console_exec(tell => $cmd_user => join(", ", sort map {/^pp\-([\w\-\"\_]+)\.dat$/ ? $1 : ()} readdir(PLAYERS)));
             closedir(PLAYERS);
           } elsif ($cmd_name eq 'list') {
             console_exec('list');
             $want_list = $cmd_user;
-          } elsif ($cmd_name eq 'buy' && $cmd_args =~ /^([\w\-]+)(?:\s+(\d+))$/) {
+          } elsif ($cmd_name eq 'buy' && $cmd_args =~ /^([\w\-\"\_]+)(?:\s+(\d+))$/) {
             my ($item, $amount) = ($1, $2||1);
             if (!-d "$tztk_dir/payment/$item/cost") {
               console_exec(tell => $cmd_user => $l10n->maketext("That item is not for sale!"));
@@ -545,10 +598,21 @@ sub snapshot_finish {
   console_exec(say => $l10n->maketext("Snapshot complete! (Saved [_1] files.)", $tar_count));
 }
 
+
+sub ensure_players_dir {
+  my $tztk_dir = "$server_properties{level_name}/players/tztk";
+  mkdir $tztk_dir unless -d $tztk_dir;
+  foreach my $subdir(@_) {
+    $tztk_dir .= "/$subdir";
+    mkdir $tztk_dir unless -d $tztk_dir;
+  }
+  return $tztk_dir;
+}
+
 sub player_create {
   my $username = lc $_[0];
   return $l10n->maketext("can't create fake player, server must set online-mode=false or provide a real user in [_1]/waypoint-auth", $tztk_dir) unless %wpauth || $server_properties{online_mode} eq 'false';
-  return $l10n->maketext("invalid name") unless $username =~ /^[\w\-]+$/;
+  return $l10n->maketext("invalid name") unless $username =~ /^[\w\-\"\_]+$/;
 
   my $player = IO::Socket::INET->new(
     Proto     => "tcp",
@@ -586,13 +650,38 @@ sub player_destroy {
 
 sub player_copy {
   my ($datafile, $username) = @_;
-
   my $user_dat = "$server_properties{level_name}/players/$username.dat";
   my $user_bkp = "$server_properties{level_name}/players/$username.bkp";
   my $data_dat = "$server_properties{level_name}/players/$datafile.dat";
+  _player_copy($data_dat, $user_dat, $user_bkp);
+}
+
+sub player_copy_from_private {
+  my ($datafile, $username, $user) = @_;
+  my $user_dat = "$server_properties{level_name}/players/$username.dat";
+  my $user_bkp = "$server_properties{level_name}/players/$username.bkp";
+  my $data_dat = "$server_properties{level_name}/players/tztk/wpp/$user/$datafile.dat";
+  _player_copy($data_dat, $user_dat, $user_bkp);
+}
+
+sub player_move_to_private {
+  my ($datafile, $username, $user) = @_;
+  my $user_dat = "$server_properties{level_name}/players/tztk/wpp/$user/$username.dat";
+  my $data_bkp = "$server_properties{level_name}/players/$datafile.bkp";
+  my $data_dat = "$server_properties{level_name}/players/$datafile.dat";
+  _player_copy($data_dat, $user_dat, "") or return 0;
+  if (%wpauth) {
+    return -e $data_bkp and _player_copy($data_bkp, $data_dat, "");
+  } else {
+    return unlink $data_dat;
+  }
+}
+
+sub _player_copy {
+  my ($data_dat, $user_dat, $user_bkp) = @_;
 
   if (-e $user_dat) {
-    if (-l $user_dat) {
+    if (-l $user_dat or not $user_bkp) {
       # remove the old link
       unlink $user_dat;
     } else {
@@ -605,7 +694,7 @@ sub player_copy {
 }
 
 sub player_is_human {
-  return $_[0] !~ /^wp\-/ && (!%wpauth || $_[0] ne $wpauth{username});
+  return $_[0] !~ /^[wp]p\-/ && (!%wpauth || $_[0] ne $wpauth{username});
 }
 
 sub mcauth_startsession {
