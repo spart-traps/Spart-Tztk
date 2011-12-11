@@ -228,16 +228,20 @@ while (kill 0 => $server_pid) {
 
           irc_send($irc, $l10n->maketext("[_1] has connected", $username)) if $irc && player_is_human($username);
 
-          if ($username && player_is_human($username) && -e "$tztk_dir/motd" && open(MOTD, "$tztk_dir/motd")) {
-            console_exec(tell => $username => $l10n->maketext("Message of the day:"));
-            while (<MOTD>) {
-              chomp;
-              next unless /\S/;
-              console_exec(tell => $username => $_);
+          if ($username && player_is_human($username)) {
+            if (-e "$tztk_dir/motd" && open(MOTD, "$tztk_dir/motd")) {
+              console_exec(tell => $username => $l10n->maketext("Message of the day:"));
+              while (<MOTD>) {
+                chomp;
+                next unless /\S/;
+                console_exec(tell => $username => $_);
+              }
+              close MOTD;
             }
-            close MOTD;
+            if (read_messages($username)) {
+              console_exec(tell => $username => $l10n->maketext("*** You have messages. Type '-msg' to read."));
+            }
           }
-
           console_exec('list');
         # connection lost notices
         # Username lost connection: Quitting
@@ -347,6 +351,63 @@ while (kill 0 => $server_pid) {
                             $match, $days, $hours, $mins, $secs));
             }
             console_exec(say => $l10n->maketext("[_1] has never been seen around.", $query)) unless @matches;
+          } elsif ($cmd_name eq 'del-msg') {
+            my $msg_dir = ensure_players_dir("msg", $cmd_user);
+            my @msgs = <$msg_dir/*>;
+            next unless @msgs;
+            if (defined $cmd_args and $cmd_args =~ /^\d+$/) {
+              if (defined $msgs[$&]) {
+                unlink $msgs[$&];
+                console_exec(say => $l10n->maketext("Message [_1] deleted.", $&));
+              } else {
+                console_exec(say => $l10n->maketext("Message number [_1] does not exist.", $&));
+              }  
+            } elsif (! defined $cmd_args) {
+              map { unlink $_; } @msgs;
+              console_exec(tell => $cmd_user => $l10n->maketext("All messages deleted."));
+            } else {
+              console_exec(tell => $cmd_user => $l10n->maketext("Syntax: '-del-msg <number>' to delete 1 message or '-del-msg' to delete all messages."));
+            }
+          } elsif ($cmd_name eq 'msg') {
+            my ($user, $msg);
+            if (defined $cmd_args && $cmd_args =~ /^(\S+)+\s+(.*)$/) {
+              ($user, $msg) = ($1, $2);
+            }
+            if (!$user and !$msg) {
+              my @msgs = read_messages($cmd_user);
+              if (!@msgs) {
+                console_exec(tell => $cmd_user => $l10n->maketext("You don't have any message."));
+                next;
+              }
+              foreach my $message(@msgs) {
+                console_exec(tell => $cmd_user => $message);
+              }
+              console_exec(tell => $cmd_user => $l10n->maketext("*** End of messages ; use '-del-msg' or '-del-msg <number>' to delete old messages."));
+            } elsif ($user and $msg) {
+              my @players = grep { /([\w\-\"\_]+)\.dat$/ && player_is_human($1) && ($_ = $1); } <$server_properties{level_name}/players/*>;
+              if (grep( /^$user$/, @players)) {
+                my $msg_dir = ensure_players_dir("msg", $user);
+                my @msgs = <$msg_dir/*>;
+                my ($last, $next);
+                while (@msgs) {
+                  $last = pop @msgs;
+                  $last =~ /\d+$/ and ($next = $&) and last;
+                }
+                open(MSG, ">$msg_dir/".++$next) or console_exec(tell => $cmd_user => $l10n->maketext("Can't create message file."));
+                print MSG $l10n->maketext("Message from [_1]: ", $cmd_user);
+                print MSG $msg;
+                close MSG;
+                console_exec(tell => $cmd_user => $l10n->maketext("Will tell [_1] he has messages waiting.", $user));
+                console_exec(tell => $user => $l10n->maketext("*** You have messages. Type '-msg' to read."));
+              } else {
+                console_exec(tell => $cmd_user => $l10n->maketext("No player by the name of '[_1]'.", $user));
+                if (my ($res, @junk) = grep( /$user/i, @players)) {
+                  console_exec(tell => $cmd_user => $l10n->maketext("Did you mean '[_1]'?", $res));
+                }
+              }
+            } else {
+              console_exec(tell => $cmd_user => $l10n->maketext("Syntax: '-msg <Username> <Message>' to post ; '-msg' to read."));
+            }
           } elsif ($cmd_name eq 'help' && -e "$tztk_dir/help" && open(HELP, "$tztk_dir/help")) {
             while (<HELP>) {
               chomp;
@@ -661,6 +722,19 @@ sub schedule_shutdown {
     $delay = 180;
   }
   return (time+$delay*60, $downtime, $shutdown_scheduled);
+}
+
+sub read_messages {
+  my $user = shift;
+  my @result;
+  my $msg_dir = ensure_players_dir("msg", $user);
+  my @msgs = <$msg_dir/*>;
+  foreach my $msg(@msgs) {
+    open (MSG, $msg);
+    push @result, <MSG>;
+    close MSG;
+  }
+  return @result;
 }
 
 sub ensure_players_dir {
