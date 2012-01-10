@@ -207,9 +207,16 @@ while (kill 0 => $server_pid) {
             if (-d "$tztk_dir/whitelisted-players") {
               $whitelist_active = 1;
               $whitelist_passed = 1 if -e "$tztk_dir/whitelisted-players/$username";
-              if (-s "$tztk_dir/whitelisted-players/$username" > 6) {
+              if (-s "$tztk_dir/whitelisted-players/$username" > 2) {
                 open(IPS, "$tztk_dir/whitelisted-players/$username");
-                $ip_allowed_for_username = grep {/^$ip/} <IPS>;
+                $ip_allowed_for_username = 0;
+                foreach my $allowed_ip (<IPS>) {
+                  chomp $allowed_ip;
+                  if ($allowed_ip and $ip =~ /^$allowed_ip/) {
+                    $ip_allowed_for_username = 1;
+                    last;
+                  } 
+                }
                 close IPS;
               }
             }
