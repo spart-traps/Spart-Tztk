@@ -856,7 +856,21 @@ sub mcauth_joinserver {
 sub command_allowed { -e "$tztk_dir/allowed-commands/$_[0]" }
 
 sub console_exec {
-  print MCIN join(" ", @_) . "\n";
+  if ($_[0] eq 'tell' || $_[0] eq 'say') {
+    # chunk output into strings of about 100 chars, spliting at whitespace
+    my @s = split(/(\s)/, $_[$#_]);
+    while (@s) {
+      my $s = shift @s;
+      while (@s and length($s)+length($s[0]) < 100) {
+        $s .= shift @s;
+      }
+      pop @_;
+      push @_, $s;
+      print MCIN join(" ", @_) . "\n";
+    }
+  } else {
+    print MCIN join(" ", @_) . "\n";
+  }
 }
 
 sub cat {
