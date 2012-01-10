@@ -363,11 +363,12 @@ while (kill 0 => $server_pid) {
             my @msgs = <$msg_dir/*>;
             next unless @msgs;
             if (defined $cmd_args and $cmd_args =~ /^\d+$/) {
-              if (defined $msgs[$&]) {
-                unlink $msgs[$&];
-                console_exec(say => $l10n->maketext("Message [_1] deleted.", $&));
+              my $n = $&+1;
+              if (defined $msgs[$n]) {
+                unlink $msgs[$n];
+                console_exec(say => $l10n->maketext("Message [_1] deleted.", $n));
               } else {
-                console_exec(say => $l10n->maketext("Message number [_1] does not exist.", $&));
+                console_exec(say => $l10n->maketext("Message number [_1] does not exist.", $n));
               }  
             } elsif (! defined $cmd_args) {
               map { unlink $_; } @msgs;
