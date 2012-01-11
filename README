@@ -25,8 +25,8 @@ Features:
 * changed 'create' policy : no argument means you get a 64 stack.
 * Allow optional restriction of what IP are associated with what username, so that
   random people can't steal someone's legit username on offline servers.
- Simply list the allowed IPs or IP  ranges *inside* each of the individual
-+  tztk/whitelisted-players/<username> files.
+  Simply list the allowed IPs or IP  ranges *inside* each of the individual
+  tztk/whitelisted-players/<username> files.
   e.g: 154.48.9.34
        234.44.
   and only people with the corresponding IP, or with IP matching with
