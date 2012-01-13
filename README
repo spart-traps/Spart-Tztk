@@ -11,7 +11,7 @@ Features:
 * add '-msg'/ and '-del-msg' : crude mailing system. Syntax : '-msg <username>
   <message>' to send message ; '-msg' to read messages ; '-del-msg' to delete all
   received messages ; '-del-msg <number>' to delete specific message.
-* add '-motd' command to display the tztk/motd file in chat
+* whisper the tztk/motd file to players when they join (if file exists)
 * add '-help' command to display the tztk/help file in chat (you need to
   write the content of this help file.)
 * add '-seen <username>' command to display the delay since last connection
